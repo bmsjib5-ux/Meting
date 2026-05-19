@@ -73,6 +73,24 @@
     #room { grid-template-columns: 1fr; grid-template-areas: "videos" "side" "bar"; }
     #side { border-left: none; border-top: 1px solid var(--border); max-height: 40vh; }
   }
+
+  /* Post-recording modal */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 100; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 720px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+  .modal header { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .modal header h2 { margin: 0; font-size: 16px; flex: 1; }
+  .modal .body { padding: 16px; overflow: auto; flex: 1; min-height: 0; }
+  .modal footer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .modal footer .spacer { flex: 1; }
+  .modal .summary-md { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; max-height: 50vh; overflow: auto; }
+  .modal .transcript { margin-top: 12px; }
+  .modal .transcript summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 4px 0; }
+  .modal .transcript pre { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; white-space: pre-wrap; font-size: 12px; max-height: 30vh; overflow: auto; margin-top: 6px; }
+  .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .err { color: var(--danger); font-size: 13px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -127,6 +145,35 @@
   </div>
 </div>
 
+<!-- Post-recording modal -->
+<div id="rec-modal" class="modal-backdrop" role="dialog" aria-modal="true">
+  <div class="modal">
+    <header>
+      <h2>🎬 บันทึกการประชุมเรียบร้อย</h2>
+      <button id="rec-modal-close">✕</button>
+    </header>
+    <div class="body" id="rec-modal-body">
+      <p>คุณจะดาวน์โหลดเป็นไฟล์ <code>.webm</code> หรือให้ AI ช่วยสรุปการประชุมจากเสียงเป็นข้อความก็ได้</p>
+      <p class="hint" id="rec-info"></p>
+      <div id="summary-result" style="display: none;">
+        <div class="summary-md" id="summary-md"></div>
+        <details class="transcript">
+          <summary>ดู transcript เต็ม</summary>
+          <pre id="summary-transcript"></pre>
+        </details>
+      </div>
+      <p class="err" id="summary-error" style="display: none;"></p>
+    </div>
+    <footer>
+      <button id="btn-download-video">⬇️ ดาวน์โหลดวิดีโอ</button>
+      <button id="btn-summarize" class="primary">🤖 สรุปด้วย AI</button>
+      <button id="btn-download-summary" style="display: none;">⬇️ ดาวน์โหลดสรุป (.md)</button>
+      <div class="spacer"></div>
+      <button id="btn-modal-done">เสร็จสิ้น</button>
+    </footer>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
 (() => {
@@ -173,6 +220,12 @@
   let sharing = false;
   let recorder = null;
   let recordedChunks = [];
+  let audioRecorder = null;
+  let audioChunks = [];
+  let recordingStartedAt = 0;
+  let lastVideoBlob = null;
+  let lastAudioBlob = null;
+  let lastSummary = null;
 
   /** @type {Map<string, { pc: RTCPeerConnection, name: string, polite: boolean, makingOffer: boolean, ignoreOffer: boolean, videoSender: RTCRtpSender|null, audioSender: RTCRtpSender|null }>} */
   const peers = new Map();
@@ -399,58 +452,205 @@
     attachStream('self', localStream);
   }
 
-  function buildMixedRecordStream() {
-    // Mix the local video with all incoming audio tracks for a basic recording.
+  function collectRemoteAudioTracks() {
     const tracks = [];
-    const localVideo = localStream.getVideoTracks()[0];
-    if (localVideo) tracks.push(localVideo);
-    const localAudio = localStream.getAudioTracks()[0];
-    if (localAudio) tracks.push(localAudio);
     for (const tile of document.querySelectorAll('#videos .tile video')) {
       const s = tile.srcObject;
       if (!s || s === localStream) continue;
       for (const t of s.getAudioTracks()) tracks.push(t);
     }
+    return tracks;
+  }
+
+  function buildMixedRecordStream() {
+    const tracks = [];
+    const localVideo = localStream.getVideoTracks()[0];
+    if (localVideo) tracks.push(localVideo);
+    const localAudio = localStream.getAudioTracks()[0];
+    if (localAudio) tracks.push(localAudio);
+    tracks.push(...collectRemoteAudioTracks());
     return new MediaStream(tracks);
+  }
+
+  function buildAudioOnlyStream() {
+    const tracks = [];
+    const localAudio = localStream.getAudioTracks()[0];
+    if (localAudio) tracks.push(localAudio);
+    tracks.push(...collectRemoteAudioTracks());
+    return new MediaStream(tracks);
+  }
+
+  function pickVideoMime() {
+    for (const m of ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']) {
+      if (MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return '';
+  }
+
+  function pickAudioMime() {
+    for (const m of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) {
+      if (MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return '';
   }
 
   function startRecording() {
     const mixed = buildMixedRecordStream();
-    let mime = 'video/webm;codecs=vp9,opus';
-    if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8,opus';
-    if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+    const videoMime = pickVideoMime();
+    const audioMime = pickAudioMime();
 
     recordedChunks = [];
+    audioChunks = [];
+    lastVideoBlob = null;
+    lastAudioBlob = null;
+    lastSummary = null;
+
     try {
-      recorder = new MediaRecorder(mixed, { mimeType: mime, videoBitsPerSecond: 2_500_000 });
+      recorder = new MediaRecorder(mixed, videoMime ? { mimeType: videoMime, videoBitsPerSecond: 2_500_000 } : undefined);
     } catch (err) {
       alert('Recording is not supported in this browser.');
       return;
     }
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) recordedChunks.push(e.data); };
     recorder.onstop = () => {
-      const blob = new Blob(recordedChunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      a.href = url;
-      a.download = `meeting-${roomId}-${ts}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      lastVideoBlob = new Blob(recordedChunks, { type: 'video/webm' });
+      maybeOpenRecModal();
     };
+
+    try {
+      const audioStream = buildAudioOnlyStream();
+      audioRecorder = new MediaRecorder(audioStream, audioMime ? { mimeType: audioMime, audioBitsPerSecond: 128_000 } : undefined);
+      audioRecorder.ondataavailable = (e) => { if (e.data && e.data.size) audioChunks.push(e.data); };
+      audioRecorder.onstop = () => {
+        lastAudioBlob = new Blob(audioChunks, { type: audioMime || 'audio/webm' });
+        maybeOpenRecModal();
+      };
+      audioRecorder.start(1000);
+    } catch (err) {
+      console.warn('audio-only recorder unavailable', err);
+      audioRecorder = null;
+    }
+
+    recordingStartedAt = Date.now();
     recorder.start(1000);
     toggleRecord.innerHTML = '<span class="rec-dot"></span>Stop';
     toggleRecord.classList.add('danger');
   }
 
+  let _modalOpenedForThisRecording = false;
+  function maybeOpenRecModal() {
+    const videoDone = !recorder || recorder.state === 'inactive';
+    const audioDone = !audioRecorder || audioRecorder.state === 'inactive';
+    if (!videoDone || !audioDone) return;
+    if (_modalOpenedForThisRecording) return;
+    if (!lastVideoBlob && !lastAudioBlob) return;
+    _modalOpenedForThisRecording = true;
+    openRecModal();
+  }
+
   function stopRecording() {
+    _modalOpenedForThisRecording = false;
     if (recorder && recorder.state !== 'inactive') recorder.stop();
-    recorder = null;
+    if (audioRecorder && audioRecorder.state !== 'inactive') audioRecorder.stop();
     toggleRecord.textContent = '⏺️ Record';
     toggleRecord.classList.remove('danger');
   }
+
+  // ----- Post-recording modal -----
+  const recModal = document.getElementById('rec-modal');
+  const recInfo = document.getElementById('rec-info');
+  const btnDownloadVideo = document.getElementById('btn-download-video');
+  const btnSummarize = document.getElementById('btn-summarize');
+  const btnDownloadSummary = document.getElementById('btn-download-summary');
+  const btnModalDone = document.getElementById('btn-modal-done');
+  const btnModalClose = document.getElementById('rec-modal-close');
+  const summaryResult = document.getElementById('summary-result');
+  const summaryMd = document.getElementById('summary-md');
+  const summaryTranscript = document.getElementById('summary-transcript');
+  const summaryError = document.getElementById('summary-error');
+
+  function openRecModal() {
+    const durSec = Math.round((Date.now() - recordingStartedAt) / 1000);
+    const min = Math.floor(durSec / 60);
+    const sec = durSec % 60;
+    const vSize = lastVideoBlob ? (lastVideoBlob.size / 1024 / 1024).toFixed(1) + ' MB' : '—';
+    const aSize = lastAudioBlob ? (lastAudioBlob.size / 1024 / 1024).toFixed(2) + ' MB' : '—';
+    recInfo.textContent = `ความยาว ~${min}:${String(sec).padStart(2, '0')} • วิดีโอ ${vSize} • เสียง ${aSize}`;
+    summaryResult.style.display = 'none';
+    summaryError.style.display = 'none';
+    btnDownloadSummary.style.display = 'none';
+    btnSummarize.disabled = !lastAudioBlob;
+    btnSummarize.innerHTML = '🤖 สรุปด้วย AI';
+    btnDownloadVideo.disabled = !lastVideoBlob;
+    recModal.classList.add('open');
+  }
+
+  function closeRecModal() {
+    recModal.classList.remove('open');
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function tsName() {
+    return new Date().toISOString().replace(/[:.]/g, '-');
+  }
+
+  btnDownloadVideo.addEventListener('click', () => {
+    if (!lastVideoBlob) return;
+    downloadBlob(lastVideoBlob, `meeting-${roomId}-${tsName()}.webm`);
+  });
+
+  btnDownloadSummary.addEventListener('click', () => {
+    if (!lastSummary) return;
+    const blob = new Blob([lastSummary], { type: 'text/markdown;charset=utf-8' });
+    downloadBlob(blob, `meeting-${roomId}-${tsName()}-summary.md`);
+  });
+
+  btnModalDone.addEventListener('click', closeRecModal);
+  btnModalClose.addEventListener('click', closeRecModal);
+
+  btnSummarize.addEventListener('click', async () => {
+    if (!lastAudioBlob) return;
+    if (lastAudioBlob.size > 25 * 1024 * 1024) {
+      summaryError.textContent = 'ไฟล์เสียงใหญ่กว่า 25MB ซึ่งเป็น limit ของ Whisper — ลองบันทึกสั้นลง';
+      summaryError.style.display = 'block';
+      return;
+    }
+    summaryError.style.display = 'none';
+    btnSummarize.disabled = true;
+    btnSummarize.innerHTML = '<span class="spinner"></span>กำลังสรุป...';
+    try {
+      const form = new FormData();
+      form.append('audio', lastAudioBlob, `meeting-${roomId}-${tsName()}.webm`);
+      const resp = await fetch('/api/summarize', { method: 'POST', body: form });
+      const data = await resp.json();
+      if (!resp.ok) {
+        const msg = data.message || data.error || `HTTP ${resp.status}`;
+        throw new Error(msg);
+      }
+      lastSummary = data.summary || '';
+      summaryMd.textContent = lastSummary;
+      summaryTranscript.textContent = data.transcript || '';
+      summaryResult.style.display = 'block';
+      btnDownloadSummary.style.display = '';
+      btnSummarize.innerHTML = '✅ สรุปแล้ว';
+    } catch (err) {
+      console.error('summarize failed', err);
+      summaryError.textContent = 'สรุปไม่สำเร็จ: ' + err.message;
+      summaryError.style.display = 'block';
+      btnSummarize.disabled = false;
+      btnSummarize.innerHTML = '🤖 ลองใหม่';
+    }
+  });
 
   // ----- Lobby actions -----
   joinBtn.addEventListener('click', joinFlow);
