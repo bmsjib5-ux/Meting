@@ -764,7 +764,11 @@
     if (localStream) for (const t of localStream.getTracks()) t.stop();
     if (screenStream) for (const t of screenStream.getTracks()) t.stop();
     if (recorder && recorder.state === 'recording') recorder.stop();
-    location.reload();
+    if (audioRecorder && audioRecorder.state === 'recording') audioRecorder.stop();
+    // Navigate to a URL without ?room= so the auto-join guard doesn't fire on the
+    // fresh page; plain location.reload() would keep the query string and bounce
+    // the user straight back into the same meeting.
+    location.href = location.pathname;
   });
 
   // ----- Tabs -----
