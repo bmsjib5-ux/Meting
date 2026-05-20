@@ -139,6 +139,7 @@
     <button id="toggle-cam">📷 Cam</button>
     <button id="toggle-share">🖥️ Share</button>
     <button id="toggle-record">⏺️ Record</button>
+    <button id="copy-link" title="คัดลอกลิงก์เชิญเพื่อน">🔗 คัดลอกลิงก์</button>
     <div class="spacer"></div>
     <span class="room-tag">Room: <strong id="room-tag-name"></strong></span>
     <button id="leave-btn" class="danger">Leave</button>
@@ -200,6 +201,7 @@
   const toggleCam = document.getElementById('toggle-cam');
   const toggleShare = document.getElementById('toggle-share');
   const toggleRecord = document.getElementById('toggle-record');
+  const copyLinkBtn = document.getElementById('copy-link');
   const leaveBtn = document.getElementById('leave-btn');
   const roomTagName = document.getElementById('room-tag-name');
 
@@ -207,6 +209,11 @@
   const qs = new URLSearchParams(location.search);
   if (qs.get('room')) roomInput.value = qs.get('room');
   if (localStorage.getItem('mr_name')) nameInput.value = localStorage.getItem('mr_name');
+
+  // Auto-join: if URL carries a room and we already know the user's name
+  // (returning visitor opening a shared link), submit the lobby immediately.
+  // The room call's permission prompts and Leave button remain available as escape hatches.
+  const autoJoin = qs.get('room') && localStorage.getItem('mr_name') && qs.get('lobby') !== '1';
 
   let socket = null;
   let selfId = null;
@@ -778,6 +785,49 @@
     socket.emit('chat', { message });
     chatInput.value = '';
   });
+
+  // ----- Copy / share invite link -----
+  function buildInviteLink() {
+    const url = new URL(location.href);
+    url.searchParams.set('room', roomId);
+    url.searchParams.delete('lobby');
+    return url.toString();
+  }
+
+  function flashCopied() {
+    const original = copyLinkBtn.innerHTML;
+    copyLinkBtn.innerHTML = '✓ คัดลอกแล้ว';
+    copyLinkBtn.classList.add('primary');
+    setTimeout(() => {
+      copyLinkBtn.innerHTML = original;
+      copyLinkBtn.classList.remove('primary');
+    }, 1800);
+  }
+
+  const isMobile = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+
+  copyLinkBtn.addEventListener('click', async () => {
+    const link = buildInviteLink();
+    if (navigator.share && isMobile) {
+      try {
+        await navigator.share({ title: 'Meeting Room', text: `เข้าห้องประชุม: ${roomId}`, url: link });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      flashCopied();
+    } catch {
+      window.prompt('คัดลอกลิงก์นี้:', link);
+    }
+  });
+
+  // ----- Auto-join from shared link -----
+  if (autoJoin) {
+    setTimeout(joinFlow, 50);
+  }
 })();
 </script>
 </body>
