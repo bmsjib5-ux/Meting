@@ -289,14 +289,6 @@
   // The room call's permission prompts and Leave button remain available as escape hatches.
   const autoJoin = qs.get('room') && localStorage.getItem('mr_name') && qs.get('lobby') !== '1';
 
-  // Sync the view popup's active button with the persisted preference
-  (function initViewPopupActive() {
-    const target = viewMode === 'spotlight' ? 'spotlight' : 'grid:' + gridSize;
-    for (const b of viewPopup.querySelectorAll('button[data-view]')) {
-      b.classList.toggle('active', b.dataset.view === target);
-    }
-  })();
-
   let socket = null;
   let selfId = null;
   let hostId = null;
@@ -316,6 +308,15 @@
   let pinnedSpotlightId = null;  // user-pinned spotlight peer (overrides auto)
   let recorder = null;
   let recordedChunks = [];
+
+  // Sync the view popup's active button with the persisted preference.
+  // Must run AFTER viewMode / gridSize are declared, hence not at the top of the IIFE.
+  {
+    const target = viewMode === 'spotlight' ? 'spotlight' : 'grid:' + gridSize;
+    for (const b of viewPopup.querySelectorAll('button[data-view]')) {
+      b.classList.toggle('active', b.dataset.view === target);
+    }
+  }
   let audioRecorder = null;
   let audioChunks = [];
   let recordingStartedAt = 0;
