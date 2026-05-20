@@ -37,13 +37,35 @@
 
   /* Room layout */
   #room { display: none; height: 100%; grid-template-columns: 1fr 320px; grid-template-rows: 1fr auto; grid-template-areas: "videos side" "bar bar"; }
-  #videos { grid-area: videos; padding: 12px; overflow: auto; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-content: start; }
-  .tile { position: relative; background: #000; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; }
+  #videos { grid-area: videos; padding: 12px; overflow: auto; display: grid; gap: 10px; align-content: start; --tile-min: 260px; }
+  #videos.mode-grid { grid-template-columns: repeat(auto-fit, minmax(var(--tile-min), 1fr)); }
+  #videos.size-small { --tile-min: 160px; }
+  #videos.size-medium { --tile-min: 260px; }
+  #videos.size-large { --tile-min: 420px; }
+  #videos.mode-spotlight { grid-template-columns: repeat(12, 1fr); grid-auto-rows: minmax(80px, auto); }
+  #videos.mode-spotlight .tile { grid-column: span 2; aspect-ratio: 16/9; cursor: pointer; }
+  #videos.mode-spotlight .tile.spotlighted { grid-column: 1 / -1; aspect-ratio: 16/9; max-height: calc(100vh - 280px); cursor: default; }
+  .tile { position: relative; background: #000; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; transition: outline .15s; }
+  .tile.spotlighted { outline: 2px solid var(--accent); }
+  .tile.peer-speaking { outline: 2px solid var(--ok); }
   .tile video { width: 100%; height: 100%; object-fit: cover; background: #000; }
-  .tile .label { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.55); padding: 3px 8px; border-radius: 6px; font-size: 12px; }
-  .tile .status { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; }
-  .badge { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,.55); }
-  .badge.mute { background: rgba(255,90,95,.85); }
+  .tile video.filter-grayscale { filter: grayscale(1); }
+  .tile video.filter-sepia { filter: sepia(1); }
+  .tile video.filter-soft { filter: blur(.5px) saturate(1.15) brightness(1.05); }
+  .tile video.filter-vivid { filter: contrast(1.2) saturate(1.4); }
+  .tile video.filter-noir { filter: grayscale(1) contrast(1.3); }
+  .tile .label { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.6); padding: 3px 8px; border-radius: 6px; font-size: 12px; max-width: calc(100% - 80px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .status { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; flex-wrap: wrap; max-width: 60%; justify-content: flex-end; }
+  .badge { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,.6); white-space: nowrap; }
+  .badge.danger { background: rgba(255,90,95,.85); }
+  .badge.warn { background: rgba(255,180,60,.85); color: #000; }
+  .badge.host { background: rgba(255,210,80,.95); color: #000; }
+  .badge.share { background: rgba(79,140,255,.9); }
+  .tile.cam-off video { opacity: 0; }
+  .tile.cam-off::after { content: "📷 ปิดกล้อง"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; background: linear-gradient(135deg, #1a1f2b, #0f1115); }
+  .tile .reaction-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .reaction-fly { position: absolute; bottom: 8px; left: 50%; font-size: 40px; animation: floatUp 2.4s ease-out forwards; }
+  @keyframes floatUp { 0% { transform: translate(-50%, 0) scale(.5); opacity: 0; } 15% { transform: translate(-50%, -20px) scale(1.1); opacity: 1; } 100% { transform: translate(-50%, -180px) scale(1); opacity: 0; } }
 
   #side { grid-area: side; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
   .tabs { display: flex; border-bottom: 1px solid var(--border); }
@@ -61,11 +83,23 @@
 
   #peer-list { padding: 12px; overflow: auto; }
   .peer { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; }
-  .peer .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .peer .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: 0 0 8px; }
+  .peer .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peer .mark { font-size: 12px; }
+  .peer .mute-btn { padding: 3px 8px; font-size: 11px; }
 
-  #bar { grid-area: bar; display: flex; gap: 8px; align-items: center; padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); flex-wrap: wrap; }
+  #bar { grid-area: bar; display: flex; gap: 6px; align-items: center; padding: 10px 12px; background: var(--panel); border-top: 1px solid var(--border); flex-wrap: wrap; position: relative; }
   #bar .spacer { flex: 1; }
   #bar .room-tag { font-size: 12px; color: var(--muted); }
+  #bar button.active { background: var(--accent); border-color: var(--accent); }
+  .popup { position: absolute; bottom: 56px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: none; z-index: 50; }
+  .popup.open { display: flex; flex-wrap: wrap; gap: 4px; }
+  .popup button { padding: 6px 10px; font-size: 18px; }
+  .filter-popup { flex-direction: column; align-items: stretch; min-width: 160px; }
+  .filter-popup button { text-align: left; font-size: 13px; padding: 8px 10px; }
+  .filter-popup button.active { background: var(--accent); color: #fff; }
+  .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 16px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.5); z-index: 200; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90vw; }
+  .toast.show { opacity: 1; }
   .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-right: 6px; animation: pulse 1s infinite; vertical-align: middle; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 
@@ -139,8 +173,38 @@
     <button id="toggle-cam">📷 Cam</button>
     <button id="toggle-share">🖥️ Share</button>
     <button id="toggle-record">⏺️ Record</button>
+    <button id="toggle-hand" title="ยกมือถาม">✋ ยกมือ</button>
+    <button id="toggle-react" title="ส่งอีโมจิ">😊 React</button>
+    <button id="toggle-filter" title="ฟิลเตอร์วิดีโอ">🎨 Filter</button>
+    <button id="toggle-view" title="มุมมอง">🪟 View</button>
     <button id="copy-link" title="คัดลอกลิงก์เชิญเพื่อน">🔗 คัดลอกลิงก์</button>
     <div class="spacer"></div>
+    <div id="react-popup" class="popup">
+      <button data-emoji="👍">👍</button>
+      <button data-emoji="❤️">❤️</button>
+      <button data-emoji="😂">😂</button>
+      <button data-emoji="🎉">🎉</button>
+      <button data-emoji="👏">👏</button>
+      <button data-emoji="🔥">🔥</button>
+      <button data-emoji="😮">😮</button>
+      <button data-emoji="🙏">🙏</button>
+    </div>
+    <div id="filter-popup" class="popup filter-popup">
+      <button data-filter="" class="active">ไม่มีฟิลเตอร์</button>
+      <button data-filter="grayscale">ขาวดำ (Grayscale)</button>
+      <button data-filter="sepia">วินเทจ (Sepia)</button>
+      <button data-filter="soft">ผิวเนียน (Soft)</button>
+      <button data-filter="vivid">สีสด (Vivid)</button>
+      <button data-filter="noir">Noir</button>
+      <p class="hint" style="padding: 0 6px;">ฟิลเตอร์จะส่งให้คนอื่นเห็นด้วย (canvas processing)</p>
+    </div>
+    <div id="view-popup" class="popup filter-popup">
+      <button data-view="grid:small">Grid — เล็ก</button>
+      <button data-view="grid:medium" class="active">Grid — กลาง</button>
+      <button data-view="grid:large">Grid — ใหญ่</button>
+      <button data-view="spotlight">Spotlight (จอใหญ่ + thumbs)</button>
+      <p class="hint" style="padding: 0 6px;">คลิก tile เพื่อ pin เป็นจอใหญ่</p>
+    </div>
     <span class="room-tag">Room: <strong id="room-tag-name"></strong></span>
     <button id="leave-btn" class="danger">Leave</button>
   </div>
@@ -175,6 +239,8 @@
   </div>
 </div>
 
+<div id="toast" class="toast"></div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
 (() => {
@@ -201,6 +267,14 @@
   const toggleCam = document.getElementById('toggle-cam');
   const toggleShare = document.getElementById('toggle-share');
   const toggleRecord = document.getElementById('toggle-record');
+  const toggleHand = document.getElementById('toggle-hand');
+  const toggleReact = document.getElementById('toggle-react');
+  const toggleFilter = document.getElementById('toggle-filter');
+  const toggleView = document.getElementById('toggle-view');
+  const reactPopup = document.getElementById('react-popup');
+  const filterPopup = document.getElementById('filter-popup');
+  const viewPopup = document.getElementById('view-popup');
+  const toastEl = document.getElementById('toast');
   const copyLinkBtn = document.getElementById('copy-link');
   const leaveBtn = document.getElementById('leave-btn');
   const roomTagName = document.getElementById('room-tag-name');
@@ -215,16 +289,31 @@
   // The room call's permission prompts and Leave button remain available as escape hatches.
   const autoJoin = qs.get('room') && localStorage.getItem('mr_name') && qs.get('lobby') !== '1';
 
+  // Sync the view popup's active button with the persisted preference
+  (function initViewPopupActive() {
+    const target = viewMode === 'spotlight' ? 'spotlight' : 'grid:' + gridSize;
+    for (const b of viewPopup.querySelectorAll('button[data-view]')) {
+      b.classList.toggle('active', b.dataset.view === target);
+    }
+  })();
+
   let socket = null;
   let selfId = null;
+  let hostId = null;
   let localStream = null;
   let cameraStream = null;       // Original webcam stream (kept while screen sharing)
+  let rawCameraStream = null;    // Pre-filter camera stream (used to build filtered canvas stream)
   let screenStream = null;
   let displayName = 'Guest';
   let roomId = '';
   let micOn = true;
   let camOn = true;
   let sharing = false;
+  let handRaised = false;
+  let currentFilter = '';        // '' | 'grayscale' | 'sepia' | 'soft' | 'vivid' | 'noir'
+  let viewMode = localStorage.getItem('mr_view_mode') || 'grid';     // 'grid' | 'spotlight'
+  let gridSize = localStorage.getItem('mr_grid_size') || 'medium';   // 'small' | 'medium' | 'large'
+  let pinnedSpotlightId = null;  // user-pinned spotlight peer (overrides auto)
   let recorder = null;
   let recordedChunks = [];
   let audioRecorder = null;
@@ -234,8 +323,89 @@
   let lastAudioBlob = null;
   let lastSummary = null;
 
-  /** @type {Map<string, { pc: RTCPeerConnection, name: string, polite: boolean, makingOffer: boolean, ignoreOffer: boolean, videoSender: RTCRtpSender|null, audioSender: RTCRtpSender|null }>} */
+  /** @type {Map<string, { pc: RTCPeerConnection, name: string, polite: boolean, makingOffer: boolean, ignoreOffer: boolean, videoSender: RTCRtpSender|null, audioSender: RTCRtpSender|null, mic: boolean, cam: boolean, sharing: boolean, handRaised: boolean }>} */
   const peers = new Map();
+
+  function showToast(message, ms = 2500) {
+    toastEl.textContent = message;
+    toastEl.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => toastEl.classList.remove('show'), ms);
+  }
+
+  function emitState(patch) {
+    if (socket && socket.connected) socket.emit('state', patch);
+  }
+
+  function getEffectiveSpotlightId() {
+    if (pinnedSpotlightId && (pinnedSpotlightId === 'self' || peers.has(pinnedSpotlightId))) {
+      return pinnedSpotlightId;
+    }
+    // Auto-spotlight whoever is screen sharing (priority: remote, then self)
+    for (const [id, entry] of peers) if (entry.sharing) return id;
+    if (sharing) return 'self';
+    return null;
+  }
+
+  function applyViewMode() {
+    videosEl.classList.remove('mode-grid', 'mode-spotlight', 'size-small', 'size-medium', 'size-large');
+    if (viewMode === 'spotlight' || (viewMode === 'grid' && getEffectiveSpotlightId())) {
+      // Force spotlight layout whenever someone is sharing — that was an explicit requirement
+      videosEl.classList.add('mode-spotlight');
+    } else {
+      videosEl.classList.add('mode-grid', 'size-' + gridSize);
+    }
+    const spotId = getEffectiveSpotlightId();
+    for (const tile of videosEl.querySelectorAll('.tile')) {
+      const id = tile.id.replace('tile-', '');
+      tile.classList.toggle('spotlighted', id === spotId);
+    }
+  }
+
+  function renderTileState(id) {
+    const tile = document.getElementById('tile-' + id);
+    if (!tile) return;
+    const state = id === 'self'
+      ? { mic: micOn, cam: camOn, sharing, handRaised, isHost: hostId === selfId, name: displayName + ' (you)' }
+      : (() => {
+          const p = peers.get(id);
+          if (!p) return null;
+          return { mic: p.mic, cam: p.cam, sharing: p.sharing, handRaised: p.handRaised, isHost: hostId === id, name: p.name };
+        })();
+    if (!state) return;
+    const status = tile.querySelector('.status');
+    status.innerHTML = '';
+    if (state.isHost) status.appendChild(makeBadge('host', '👑 Host'));
+    if (state.sharing) status.appendChild(makeBadge('share', '🖥️ Sharing'));
+    if (state.handRaised) status.appendChild(makeBadge('warn', '✋'));
+    if (!state.mic) status.appendChild(makeBadge('danger', '🔇'));
+    if (!state.cam) status.appendChild(makeBadge('danger', '📷❌'));
+    tile.classList.toggle('cam-off', !state.cam);
+    tile.querySelector('.label').textContent = state.name;
+  }
+
+  function makeBadge(cls, text) {
+    const span = document.createElement('span');
+    span.className = 'badge ' + cls;
+    span.textContent = text;
+    return span;
+  }
+
+  function flyReaction(tileId, emoji) {
+    const tile = document.getElementById('tile-' + tileId);
+    if (!tile) return;
+    let layer = tile.querySelector('.reaction-layer');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'reaction-layer';
+      tile.appendChild(layer);
+    }
+    const span = document.createElement('span');
+    span.className = 'reaction-fly';
+    span.textContent = emoji;
+    layer.appendChild(span);
+    setTimeout(() => span.remove(), 2500);
+  }
 
   function showError(msg) {
     lobbyError.textContent = msg;
@@ -267,6 +437,14 @@
       <div class="label"></div>
     `;
     tile.querySelector('.label').textContent = label;
+    tile.addEventListener('click', () => {
+      if (videosEl.classList.contains('mode-spotlight')) {
+        if (pinnedSpotlightId === id) pinnedSpotlightId = null;
+        else pinnedSpotlightId = id;
+        applyViewMode();
+      }
+    });
+    if (currentFilter) tile.querySelector('video').classList.add('filter-' + currentFilter);
     videosEl.appendChild(tile);
     return tile;
   }
@@ -312,6 +490,10 @@
       ignoreOffer: false,
       videoSender: null,
       audioSender: null,
+      mic: true,
+      cam: true,
+      sharing: false,
+      handRaised: false,
     };
     peers.set(remoteId, entry);
 
@@ -332,6 +514,7 @@
       const [stream] = e.streams;
       attachStream(remoteId, stream);
       setTileLabel(remoteId, entry.name);
+      renderTileState(remoteId);
     };
 
     pc.onnegotiationneeded = async () => {
@@ -361,7 +544,9 @@
     try { entry.pc.close(); } catch {}
     peers.delete(id);
     removeTile(id);
+    if (pinnedSpotlightId === id) pinnedSpotlightId = null;
     renderPeerList();
+    applyViewMode();
   }
 
   async function handleSignal(from, data) {
@@ -393,14 +578,40 @@
   }
 
   function renderPeerList() {
+    const iAmHost = hostId && hostId === selfId;
     const items = [];
-    items.push(`<div class="peer"><span class="dot"></span><span>${escapeHtml(displayName)} (you)</span></div>`);
+    const selfBadges = [
+      hostId === selfId ? '<span class="mark" title="Host">👑</span>' : '',
+      handRaised ? '<span class="mark" title="Raised hand">✋</span>' : '',
+      !micOn ? '<span class="mark" title="Muted">🔇</span>' : '',
+      !camOn ? '<span class="mark" title="Camera off">📷❌</span>' : '',
+    ].join('');
+    items.push(`<div class="peer"><span class="dot"></span><span class="name">${escapeHtml(displayName)} (you)</span>${selfBadges}</div>`);
     for (const [id, entry] of peers) {
-      items.push(`<div class="peer"><span class="dot"></span><span>${escapeHtml(entry.name)}</span></div>`);
+      const peerIsHost = hostId === id;
+      const badges = [
+        peerIsHost ? '<span class="mark" title="Host">👑</span>' : '',
+        entry.handRaised ? '<span class="mark" title="Raised hand">✋</span>' : '',
+        !entry.mic ? '<span class="mark" title="Muted">🔇</span>' : '',
+        !entry.cam ? '<span class="mark" title="Camera off">📷❌</span>' : '',
+      ].join('');
+      const muteBtn = iAmHost && !peerIsHost && entry.mic
+        ? `<button class="mute-btn danger" data-mute="${id}" title="บังคับปิดไมค์">🔇 ปิดไมค์</button>`
+        : '';
+      items.push(`<div class="peer"><span class="dot"></span><span class="name">${escapeHtml(entry.name)}</span>${badges}${muteBtn}</div>`);
     }
     peerListEl.innerHTML = items.join('');
     peopleCountEl.textContent = String(peers.size + 1);
   }
+
+  peerListEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-mute]');
+    if (!btn) return;
+    if (hostId !== selfId) return;
+    const targetId = btn.dataset.mute;
+    if (socket && socket.connected) socket.emit('force-mute', { to: targetId });
+    showToast('ส่งคำสั่งปิดไมค์ไปแล้ว', 1500);
+  });
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -431,14 +642,23 @@
       if (entry.videoSender) await entry.videoSender.replaceTrack(screenTrack);
     }
 
-    // Show locally
+    // Show locally — clear the cosmetic CSS filter so the screen isn't tinted
     const localPreview = new MediaStream([screenTrack, ...(localStream.getAudioTracks())]);
     attachStream('self', localPreview);
+    const selfVideo = document.querySelector('#tile-self video');
+    if (selfVideo) selfVideo.classList.remove('filter-grayscale', 'filter-sepia', 'filter-soft', 'filter-vivid', 'filter-noir');
+    // Suspend the canvas pipeline while sharing — the screen track owns the sender
+    stopFilterPipeline();
     sharing = true;
     toggleShare.classList.add('primary');
     toggleShare.textContent = '🛑 Stop share';
 
-    screenTrack.onended = () => stopShare();
+    screenTrack.onended = () => {
+      stopShare();
+      renderTileState('self');
+      emitState({ sharing: false });
+      applyViewMode();
+    };
   }
 
   async function stopShare() {
@@ -457,6 +677,92 @@
       if (entry.videoSender) await entry.videoSender.replaceTrack(camTrack || null);
     }
     attachStream('self', localStream);
+    // Re-apply the filter pipeline if one was active before sharing
+    if (currentFilter) await applyVideoFilter(currentFilter);
+  }
+
+  // ----- Video filter pipeline -----
+  // CSS filter handles the local preview cheaply. For the outbound stream,
+  // build a canvas with `ctx.filter` and replace each peer's video sender
+  // with the canvas-captured track so other participants see the filter too.
+  let filterCanvas = null;
+  let filterCanvasStream = null;
+  let filterRafId = null;
+  let filterSourceVideo = null;
+
+  const FILTER_CSS = {
+    grayscale: 'grayscale(1)',
+    sepia: 'sepia(.85)',
+    soft: 'blur(.4px) saturate(1.15) brightness(1.05)',
+    vivid: 'contrast(1.2) saturate(1.4)',
+    noir: 'grayscale(1) contrast(1.3) brightness(1.05)',
+  };
+
+  function stopFilterPipeline() {
+    if (filterRafId) cancelAnimationFrame(filterRafId);
+    filterRafId = null;
+    if (filterCanvasStream) {
+      for (const t of filterCanvasStream.getTracks()) t.stop();
+      filterCanvasStream = null;
+    }
+  }
+
+  async function applyVideoFilter(name) {
+    currentFilter = name || '';
+
+    // Local preview: just CSS on every tile's <video> for instant feedback.
+    for (const video of videosEl.querySelectorAll('video')) {
+      video.classList.remove('filter-grayscale', 'filter-sepia', 'filter-soft', 'filter-vivid', 'filter-noir');
+      if (currentFilter) video.classList.add('filter-' + currentFilter);
+    }
+
+    // Outbound: skip while screen sharing — the screen track owns the video sender.
+    if (sharing) return;
+
+    stopFilterPipeline();
+
+    if (!currentFilter) {
+      // Restore the raw camera track on each peer's outbound video sender.
+      const rawTrack = cameraStream && cameraStream.getVideoTracks()[0];
+      for (const entry of peers.values()) {
+        if (entry.videoSender) await entry.videoSender.replaceTrack(rawTrack || null);
+      }
+      return;
+    }
+
+    if (!cameraStream) return;
+
+    if (!filterSourceVideo) {
+      filterSourceVideo = document.createElement('video');
+      filterSourceVideo.autoplay = true;
+      filterSourceVideo.playsInline = true;
+      filterSourceVideo.muted = true;
+    }
+    filterSourceVideo.srcObject = cameraStream;
+    await filterSourceVideo.play().catch(() => {});
+
+    if (!filterCanvas) filterCanvas = document.createElement('canvas');
+    const camTrack = cameraStream.getVideoTracks()[0];
+    const settings = camTrack ? camTrack.getSettings() : {};
+    filterCanvas.width = settings.width || 1280;
+    filterCanvas.height = settings.height || 720;
+
+    const ctx = filterCanvas.getContext('2d');
+    const cssFilter = FILTER_CSS[currentFilter] || 'none';
+    function draw() {
+      if (filterSourceVideo.readyState >= 2) {
+        ctx.filter = cssFilter;
+        ctx.drawImage(filterSourceVideo, 0, 0, filterCanvas.width, filterCanvas.height);
+      }
+      filterRafId = requestAnimationFrame(draw);
+    }
+    draw();
+
+    filterCanvasStream = filterCanvas.captureStream(30);
+    const filteredTrack = filterCanvasStream.getVideoTracks()[0];
+    for (const entry of peers.values()) {
+      if (entry.videoSender) await entry.videoSender.replaceTrack(filteredTrack);
+    }
   }
 
   function collectRemoteAudioTracks() {
@@ -689,6 +995,7 @@
     roomTagName.textContent = roomId;
     attachStream('self', localStream);
     setTileLabel('self', `${displayName} (you)`);
+    applyViewMode();
 
     // Update URL so it's easy to share
     const url = new URL(location.href);
@@ -701,11 +1008,20 @@
       socket.emit('join', { roomId, name: displayName }, (resp) => {
         if (!resp || !resp.ok) { showError('Failed to join room.'); return; }
         selfId = resp.selfId;
+        hostId = resp.hostId;
         // For each existing peer, we are the new arrival → we initiate.
         for (const p of resp.peers) {
-          createPeer(p.id, p.name, true);
+          const entry = createPeer(p.id, p.name, true);
+          entry.mic = p.mic;
+          entry.cam = p.cam;
+          entry.sharing = p.sharing;
+          entry.handRaised = p.handRaised;
         }
+        renderTileState('self');
         renderPeerList();
+        applyViewMode();
+        // Push our initial state so the rest of the room knows our mic/cam status
+        emitState({ mic: micOn, cam: camOn, sharing, handRaised });
       });
     });
 
@@ -717,17 +1033,47 @@
 
     socket.on('peer-left', ({ id }) => cleanupPeer(id));
 
-    socket.on('peers', (list) => {
-      for (const p of list) {
+    socket.on('peers', (msg) => {
+      // msg = { hostId, peers: [{id,name,mic,cam,sharing,handRaised}, ...] }
+      const previousHost = hostId;
+      hostId = msg.hostId;
+      for (const p of msg.peers) {
+        if (p.id === selfId) continue;
         const entry = peers.get(p.id);
-        if (entry) { entry.name = p.name; setTileLabel(p.id, p.name); }
+        if (!entry) continue;
+        entry.name = p.name;
+        entry.mic = p.mic;
+        entry.cam = p.cam;
+        entry.sharing = p.sharing;
+        entry.handRaised = p.handRaised;
+        renderTileState(p.id);
       }
+      renderTileState('self');
       renderPeerList();
+      applyViewMode();
+      if (previousHost !== hostId && hostId === selfId) {
+        showToast('คุณคือ host ของห้องนี้แล้ว');
+      }
     });
 
     socket.on('signal', ({ from, data }) => handleSignal(from, data));
 
     socket.on('chat', (msg) => addChatMessage(msg));
+
+    socket.on('forced-mute', () => {
+      if (!micOn) return;
+      micOn = false;
+      if (localStream) localStream.getAudioTracks().forEach((t) => { t.enabled = false; });
+      toggleMic.textContent = '🔇 Mic off';
+      toggleMic.classList.add('danger');
+      emitState({ mic: false });
+      renderTileState('self');
+      showToast('Host ปิดเสียงไมค์ของคุณแล้ว — กด 🎤 เพื่อเปิดอีกครั้ง', 4000);
+    });
+
+    socket.on('reaction', ({ from, emoji }) => {
+      flyReaction(from === selfId ? 'self' : from, emoji);
+    });
   }
 
   // ----- Bar actions -----
@@ -737,7 +1083,8 @@
     localStream.getAudioTracks().forEach((t) => { t.enabled = micOn; });
     toggleMic.textContent = micOn ? '🎤 Mic' : '🔇 Mic off';
     toggleMic.classList.toggle('danger', !micOn);
-    setTileMute('self', !micOn);
+    renderTileState('self');
+    emitState({ mic: micOn });
   });
 
   toggleCam.addEventListener('click', () => {
@@ -746,11 +1093,90 @@
     localStream.getVideoTracks().forEach((t) => { t.enabled = camOn; });
     toggleCam.textContent = camOn ? '📷 Cam' : '📷 Cam off';
     toggleCam.classList.toggle('danger', !camOn);
+    renderTileState('self');
+    emitState({ cam: camOn });
   });
 
   toggleShare.addEventListener('click', async () => {
     if (sharing) await stopShare();
     else await startShare();
+    renderTileState('self');
+    emitState({ sharing });
+    applyViewMode();
+  });
+
+  toggleHand.addEventListener('click', () => {
+    handRaised = !handRaised;
+    toggleHand.classList.toggle('active', handRaised);
+    toggleHand.textContent = handRaised ? '✋ ลดมือ' : '✋ ยกมือ';
+    renderTileState('self');
+    emitState({ handRaised });
+    if (handRaised) showToast('คุณยกมือแล้ว — แตะ "ลดมือ" เพื่อเอาออก', 2000);
+  });
+
+  // ----- Popup helpers -----
+  function closeAllPopups(except) {
+    for (const p of [reactPopup, filterPopup, viewPopup]) {
+      if (p !== except) p.classList.remove('open');
+    }
+  }
+  function togglePopup(p, anchor) {
+    const open = p.classList.contains('open');
+    closeAllPopups();
+    if (!open) {
+      p.classList.add('open');
+      // Position near the anchor button
+      const rect = anchor.getBoundingClientRect();
+      const barRect = anchor.parentElement.getBoundingClientRect();
+      p.style.left = Math.max(8, rect.left - barRect.left) + 'px';
+    }
+  }
+  toggleReact.addEventListener('click', () => togglePopup(reactPopup, toggleReact));
+  toggleFilter.addEventListener('click', () => togglePopup(filterPopup, toggleFilter));
+  toggleView.addEventListener('click', () => togglePopup(viewPopup, toggleView));
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.popup') && !e.target.closest('#toggle-react, #toggle-filter, #toggle-view')) {
+      closeAllPopups();
+    }
+  });
+
+  reactPopup.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-emoji]');
+    if (!btn) return;
+    if (socket && socket.connected) socket.emit('reaction', { emoji: btn.dataset.emoji });
+    closeAllPopups();
+  });
+
+  viewPopup.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-view]');
+    if (!btn) return;
+    const val = btn.dataset.view;
+    if (val === 'spotlight') {
+      viewMode = 'spotlight';
+    } else {
+      const [mode, size] = val.split(':');
+      viewMode = mode;
+      gridSize = size;
+    }
+    localStorage.setItem('mr_view_mode', viewMode);
+    localStorage.setItem('mr_grid_size', gridSize);
+    for (const b of viewPopup.querySelectorAll('button[data-view]')) {
+      b.classList.toggle('active', b.dataset.view === val);
+    }
+    pinnedSpotlightId = null;
+    applyViewMode();
+    closeAllPopups();
+  });
+
+  filterPopup.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-filter]');
+    if (!btn) return;
+    const f = btn.dataset.filter;
+    for (const b of filterPopup.querySelectorAll('button[data-filter]')) {
+      b.classList.toggle('active', b.dataset.filter === f);
+    }
+    await applyVideoFilter(f);
+    closeAllPopups();
   });
 
   toggleRecord.addEventListener('click', () => {

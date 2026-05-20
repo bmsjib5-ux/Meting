@@ -121,14 +121,26 @@ app.post('/api/summarize', upload.single('audio'), async (req, res) => {
 const rooms = new Map();
 
 function getRoom(roomId) {
-  if (!rooms.has(roomId)) rooms.set(roomId, new Map());
+  if (!rooms.has(roomId)) {
+    rooms.set(roomId, { hostId: null, peers: new Map() });
+  }
   return rooms.get(roomId);
+}
+
+function peerSnapshot(room) {
+  return Array.from(room.peers.entries()).map(([id, info]) => ({
+    id,
+    name: info.name,
+    mic: info.mic,
+    cam: info.cam,
+    sharing: info.sharing,
+    handRaised: info.handRaised,
+  }));
 }
 
 function broadcastPeers(roomId) {
   const room = getRoom(roomId);
-  const peers = Array.from(room.entries()).map(([id, info]) => ({ id, name: info.name }));
-  io.to(roomId).emit('peers', peers);
+  io.to(roomId).emit('peers', { hostId: room.hostId, peers: peerSnapshot(room) });
 }
 
 io.on('connection', (socket) => {
@@ -144,13 +156,20 @@ io.on('connection', (socket) => {
     socket.join(roomId);
 
     const room = getRoom(roomId);
-    room.set(socket.id, { name: displayName });
+    room.peers.set(socket.id, {
+      name: displayName,
+      mic: true,
+      cam: true,
+      sharing: false,
+      handRaised: false,
+    });
+    if (!room.hostId) room.hostId = socket.id;
 
-    const existing = Array.from(room.entries())
-      .filter(([id]) => id !== socket.id)
-      .map(([id, info]) => ({ id, name: info.name }));
+    const existing = peerSnapshot(room).filter((p) => p.id !== socket.id);
 
-    if (typeof ack === 'function') ack({ ok: true, selfId: socket.id, peers: existing });
+    if (typeof ack === 'function') {
+      ack({ ok: true, selfId: socket.id, hostId: room.hostId, peers: existing });
+    }
 
     socket.to(roomId).emit('peer-joined', { id: socket.id, name: displayName });
     broadcastPeers(roomId);
@@ -164,7 +183,7 @@ io.on('connection', (socket) => {
   socket.on('chat', ({ message }) => {
     if (!joinedRoom || !message) return;
     const room = getRoom(joinedRoom);
-    const info = room.get(socket.id);
+    const info = room.peers.get(socket.id);
     const name = info ? info.name : 'Guest';
     io.to(joinedRoom).emit('chat', {
       from: socket.id,
@@ -177,19 +196,55 @@ io.on('connection', (socket) => {
   socket.on('rename', ({ name }) => {
     if (!joinedRoom) return;
     const room = getRoom(joinedRoom);
-    const info = room.get(socket.id);
+    const info = room.peers.get(socket.id);
     if (!info) return;
     info.name = (name && String(name).trim()) || info.name;
     broadcastPeers(joinedRoom);
   });
 
+  socket.on('state', (patch) => {
+    if (!joinedRoom || !patch || typeof patch !== 'object') return;
+    const room = getRoom(joinedRoom);
+    const info = room.peers.get(socket.id);
+    if (!info) return;
+    for (const key of ['mic', 'cam', 'sharing', 'handRaised']) {
+      if (typeof patch[key] === 'boolean') info[key] = patch[key];
+    }
+    broadcastPeers(joinedRoom);
+  });
+
+  socket.on('force-mute', ({ to }) => {
+    if (!joinedRoom || !to) return;
+    const room = getRoom(joinedRoom);
+    if (room.hostId !== socket.id) return; // only host may force-mute
+    if (!room.peers.has(to)) return;
+    io.to(to).emit('forced-mute', { from: socket.id });
+  });
+
+  socket.on('reaction', ({ emoji }) => {
+    if (!joinedRoom || typeof emoji !== 'string') return;
+    const clean = emoji.slice(0, 8);
+    io.to(joinedRoom).emit('reaction', { from: socket.id, emoji: clean, ts: Date.now() });
+  });
+
   socket.on('disconnect', () => {
     if (!joinedRoom) return;
     const room = getRoom(joinedRoom);
-    room.delete(socket.id);
+    const wasHost = room.hostId === socket.id;
+    room.peers.delete(socket.id);
+
+    if (room.peers.size === 0) {
+      rooms.delete(joinedRoom);
+      return;
+    }
+
+    if (wasHost) {
+      // Promote the oldest remaining peer to host (Map preserves insertion order)
+      room.hostId = room.peers.keys().next().value;
+    }
+
     socket.to(joinedRoom).emit('peer-left', { id: socket.id });
-    if (room.size === 0) rooms.delete(joinedRoom);
-    else broadcastPeers(joinedRoom);
+    broadcastPeers(joinedRoom);
   });
 });
 
