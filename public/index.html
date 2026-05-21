@@ -36,6 +36,8 @@
   .field label { color: var(--muted); font-size: 12px; }
   .row { display: flex; gap: 8px; }
   .row > * { flex: 1; }
+  .device-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .device-row button { flex: 1; padding: 12px 10px; font-size: 13px; }
 
   /* Room layout */
   #room { display: none; height: 100%; grid-template-columns: 1fr 320px; grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "videos side" "bar bar"; }
@@ -149,6 +151,11 @@
     <div class="field">
       <label for="room-input">Room code <span style="color: var(--danger);">*</span></label>
       <input id="room-input" placeholder="e.g. team-standup" autocomplete="off" maxlength="80" required />
+    </div>
+    <p class="hint" style="color: var(--muted); font-size: 12px; margin: 0 0 8px;">เลือกเปิด/ปิดไมค์และกล้องก่อนเข้าห้อง (สลับได้ภายในห้องเช่นกัน)</p>
+    <div class="device-row">
+      <button id="pre-mic" type="button" title="สลับเปิดปิดไมค์">🎤 ไมค์เปิด</button>
+      <button id="pre-cam" type="button" title="สลับเปิดปิดกล้อง">📷 กล้องเปิด</button>
     </div>
     <div class="row">
       <button id="join-btn" class="primary">Join meeting</button>
@@ -266,6 +273,8 @@
   const nameInput = document.getElementById('name-input');
   const roomInput = document.getElementById('room-input');
   const joinBtn = document.getElementById('join-btn');
+  const preMic = document.getElementById('pre-mic');
+  const preCam = document.getElementById('pre-cam');
   const videosEl = document.getElementById('videos');
   const peerListEl = document.getElementById('peer-list');
   const peopleCountEl = document.getElementById('people-count');
@@ -307,8 +316,11 @@
   let screenStream = null;
   let displayName = 'Guest';
   let roomId = '';
-  let micOn = true;
-  let camOn = true;
+  // Initial mic/cam state is chosen in the lobby before joining and persists
+  // in localStorage. They double as both the lobby-toggle state and, after
+  // join, the live in-room state.
+  let micOn = localStorage.getItem('mr_mic') !== '0';
+  let camOn = localStorage.getItem('mr_cam') !== '0';
   let sharing = false;
   let handRaised = false;
   let currentFilter = '';        // '' | 'grayscale' | 'sepia' | 'soft' | 'vivid' | 'noir'
@@ -326,6 +338,27 @@
       b.classList.toggle('active', b.dataset.view === target);
     }
   }
+
+  // Lobby device toggles — these flip the same micOn / camOn vars that the
+  // in-room toolbar uses. Updating them before join sets the initial track
+  // state right after getUserMedia returns.
+  function renderLobbyDeviceButtons() {
+    preMic.textContent = micOn ? '🎤 ไมค์เปิด' : '🔇 ไมค์ปิด';
+    preMic.classList.toggle('danger', !micOn);
+    preCam.textContent = camOn ? '📷 กล้องเปิด' : '📷 กล้องปิด';
+    preCam.classList.toggle('danger', !camOn);
+  }
+  renderLobbyDeviceButtons();
+  preMic.addEventListener('click', () => {
+    micOn = !micOn;
+    localStorage.setItem('mr_mic', micOn ? '1' : '0');
+    renderLobbyDeviceButtons();
+  });
+  preCam.addEventListener('click', () => {
+    camOn = !camOn;
+    localStorage.setItem('mr_cam', camOn ? '1' : '0');
+    renderLobbyDeviceButtons();
+  });
   let audioRecorder = null;
   let audioChunks = [];
   let recordingStartedAt = 0;
@@ -1060,6 +1093,17 @@
       joinBtn.textContent = 'Join meeting';
       return;
     }
+
+    // Apply lobby mic/cam preferences to the freshly acquired tracks. Tracks
+    // are kept in the stream (so users can flip them on later without a
+    // permission prompt); .enabled=false makes the browser send silent /
+    // black frames to other peers.
+    localStream.getAudioTracks().forEach((t) => { t.enabled = micOn; });
+    localStream.getVideoTracks().forEach((t) => { t.enabled = camOn; });
+    toggleMic.textContent = micOn ? '🎤 Mic' : '🔇 Mic off';
+    toggleMic.classList.toggle('danger', !micOn);
+    toggleCam.textContent = camOn ? '📷 Cam' : '📷 Cam off';
+    toggleCam.classList.toggle('danger', !camOn);
 
     // Hold candidate values locally — only commit to displayName/roomId when
     // the server's ack confirms the join. This way a rejected join (duplicate
