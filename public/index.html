@@ -449,7 +449,10 @@
     if (state.handRaised) status.appendChild(makeBadge('warn', '✋'));
     if (!state.mic) status.appendChild(makeBadge('danger', '🔇'));
     if (!state.cam) status.appendChild(makeBadge('danger', '📷❌'));
-    tile.classList.toggle('cam-off', !state.cam);
+    // Don't hide the video behind the cam-off overlay when the peer is
+    // screen sharing — the video element is showing the screen, not the
+    // camera. The 📷❌ badge above still communicates the cam-off state.
+    tile.classList.toggle('cam-off', !state.cam && !state.sharing);
     tile.querySelector('.label').textContent = state.name;
   }
 
@@ -513,7 +516,11 @@
         applyViewMode();
       }
     });
-    if (currentFilter) tile.querySelector('video').classList.add('filter-' + currentFilter);
+    // Filter is a vanity effect on the user's own preview only — remote
+    // tiles never get the CSS class even if a filter is currently active.
+    if (currentFilter && id === 'self' && !sharing) {
+      tile.querySelector('video').classList.add('filter-' + currentFilter);
+    }
     videosEl.appendChild(tile);
     // If we're already in spotlight mode, immediately move the new tile into
     // the strip so late-arriving peers don't get rendered as the spotlight by
@@ -570,12 +577,18 @@
     };
     peers.set(remoteId, entry);
 
-    // Add local tracks
+    // Add local tracks. The video track depends on what we're currently
+    // broadcasting (screen share > filter canvas > raw camera) so that a
+    // peer joining mid-session sees the same stream every other peer is
+    // seeing, not a stale snapshot of the raw camera.
     if (localStream) {
-      for (const track of localStream.getTracks()) {
-        const sender = pc.addTrack(track, localStream);
-        if (track.kind === 'video') entry.videoSender = sender;
-        if (track.kind === 'audio') entry.audioSender = sender;
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        entry.audioSender = pc.addTrack(audioTrack, localStream);
+      }
+      const videoTrack = getOutboundVideoTrack();
+      if (videoTrack) {
+        entry.videoSender = pc.addTrack(videoTrack, localStream);
       }
     }
 
@@ -754,10 +767,32 @@
     if (currentFilter) await applyVideoFilter(currentFilter);
   }
 
+  // ----- Outbound video track helper -----
+  // Single source of truth for "what video should each peer's sender carry?".
+  // Used both at first connection (createPeer) and when state changes
+  // (start/stop share, apply/remove filter). Priority: active screen share
+  // beats active filter, which beats the raw camera.
+  function getOutboundVideoTrack() {
+    if (sharing && screenStream) {
+      const t = screenStream.getVideoTracks()[0];
+      if (t) return t;
+    }
+    if (currentFilter && filterCanvasStream) {
+      const t = filterCanvasStream.getVideoTracks()[0];
+      if (t) return t;
+    }
+    if (cameraStream) {
+      return cameraStream.getVideoTracks()[0] || null;
+    }
+    return null;
+  }
+
   // ----- Video filter pipeline -----
-  // CSS filter handles the local preview cheaply. For the outbound stream,
-  // build a canvas with `ctx.filter` and replace each peer's video sender
-  // with the canvas-captured track so other participants see the filter too.
+  // CSS filter handles the user's local preview cheaply (so they see what
+  // they look like to others). The outbound stream is built from a canvas
+  // with ctx.filter applied so other participants actually see the filter.
+  // Remote tiles are never CSS-tinted — the filter is a personal "look",
+  // not a global colour grade for the whole call.
   let filterCanvas = null;
   let filterCanvasStream = null;
   let filterRafId = null;
@@ -783,10 +818,14 @@
   async function applyVideoFilter(name) {
     currentFilter = name || '';
 
-    // Local preview: just CSS on every tile's <video> for instant feedback.
-    for (const video of videosEl.querySelectorAll('video')) {
-      video.classList.remove('filter-grayscale', 'filter-sepia', 'filter-soft', 'filter-vivid', 'filter-noir');
-      if (currentFilter) video.classList.add('filter-' + currentFilter);
+    // Local preview: CSS filter on the self tile only — this is a vanity
+    // filter for the user's own appearance, not a colour grade for the
+    // whole call. While screen sharing, skip even the self preview so the
+    // shared screen isn't tinted.
+    const selfVideo = document.querySelector('#tile-self video');
+    if (selfVideo) {
+      selfVideo.classList.remove('filter-grayscale', 'filter-sepia', 'filter-soft', 'filter-vivid', 'filter-noir');
+      if (currentFilter && !sharing) selfVideo.classList.add('filter-' + currentFilter);
     }
 
     // Outbound: skip while screen sharing — the screen track owns the video sender.

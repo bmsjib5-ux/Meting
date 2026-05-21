@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node test-e2e.js"
   },
   "engines": {
     "node": ">=18"
@@ -15,6 +16,9 @@
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",
     "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.5"
   },
   "license": "MIT"
 }
