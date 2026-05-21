@@ -41,8 +41,12 @@
 
   /* Room layout */
   #room { display: none; height: 100%; grid-template-columns: 1fr 320px; grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "videos side" "bar bar"; }
-  #videos { grid-area: videos; padding: 12px; overflow: auto; display: grid; gap: 10px; align-content: start; --tile-min: 260px; min-height: 0; }
-  #videos.mode-grid { grid-template-columns: repeat(auto-fit, minmax(var(--tile-min), 1fr)); }
+  /* Grid mode: explicit vertical-only scroll. min(--tile-min, 100%) keeps
+     tiles inside the viewport on very narrow screens; grid-auto-rows:
+     max-content makes each row size to its tile aspect-ratio so they
+     can't overlap when the row count grows. */
+  #videos { grid-area: videos; padding: 12px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; display: grid; gap: 10px; align-content: start; --tile-min: 260px; min-height: 0; }
+  #videos.mode-grid { grid-template-columns: repeat(auto-fit, minmax(min(var(--tile-min), 100%), 1fr)); grid-auto-rows: max-content; }
   #videos.size-small { --tile-min: 160px; }
   #videos.size-medium { --tile-min: 260px; }
   #videos.size-large { --tile-min: 420px; }
@@ -56,7 +60,7 @@
   #videos.mode-spotlight .tile.spotlighted { flex: 1 1 0; min-height: 0; aspect-ratio: auto; width: 100%; cursor: default; }
   #videos .thumb-strip { display: flex; gap: 10px; flex: 0 0 130px; height: 130px; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
   #videos .thumb-strip .tile { flex: 0 0 auto; width: 200px; height: 100%; aspect-ratio: auto; cursor: pointer; }
-  .tile { position: relative; background: #000; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; transition: outline .15s; }
+  .tile { position: relative; background: #000; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; transition: outline .15s; min-width: 0; min-height: 0; }
   .tile.spotlighted { outline: 2px solid var(--accent); }
   .tile.peer-speaking { outline: 2px solid var(--ok); }
   .tile video { width: 100%; height: 100%; object-fit: cover; background: #000; }
