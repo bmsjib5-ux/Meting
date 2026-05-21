@@ -36,15 +36,22 @@
   .row > * { flex: 1; }
 
   /* Room layout */
-  #room { display: none; height: 100%; grid-template-columns: 1fr 320px; grid-template-rows: 1fr auto; grid-template-areas: "videos side" "bar bar"; }
-  #videos { grid-area: videos; padding: 12px; overflow: auto; display: grid; gap: 10px; align-content: start; --tile-min: 260px; }
+  #room { display: none; height: 100%; grid-template-columns: 1fr 320px; grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "videos side" "bar bar"; }
+  #videos { grid-area: videos; padding: 12px; overflow: auto; display: grid; gap: 10px; align-content: start; --tile-min: 260px; min-height: 0; }
   #videos.mode-grid { grid-template-columns: repeat(auto-fit, minmax(var(--tile-min), 1fr)); }
   #videos.size-small { --tile-min: 160px; }
   #videos.size-medium { --tile-min: 260px; }
   #videos.size-large { --tile-min: 420px; }
-  #videos.mode-spotlight { grid-template-columns: repeat(12, 1fr); grid-auto-rows: minmax(80px, auto); }
-  #videos.mode-spotlight .tile { grid-column: span 2; aspect-ratio: 16/9; cursor: pointer; }
-  #videos.mode-spotlight .tile.spotlighted { grid-column: 1 / -1; aspect-ratio: 16/9; max-height: calc(100vh - 280px); cursor: default; }
+
+  /* Spotlight mode: spotlighted tile fills the area above a horizontal
+     thumb strip. Tiles are reparented in/out of .thumb-strip by JS so
+     CSS can lay them out as flex children — keeping all tiles as direct
+     children of #videos (the previous 12-col approach) hid late
+     participants below the fold when there were 6+ thumbnails. */
+  #videos.mode-spotlight { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  #videos.mode-spotlight .tile.spotlighted { flex: 1 1 0; min-height: 0; aspect-ratio: auto; width: 100%; cursor: default; }
+  #videos .thumb-strip { display: flex; gap: 10px; flex: 0 0 130px; height: 130px; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
+  #videos .thumb-strip .tile { flex: 0 0 auto; width: 200px; height: 100%; aspect-ratio: auto; cursor: pointer; }
   .tile { position: relative; background: #000; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; transition: outline .15s; }
   .tile.spotlighted { outline: 2px solid var(--accent); }
   .tile.peer-speaking { outline: 2px solid var(--ok); }
@@ -349,17 +356,39 @@
   }
 
   function applyViewMode() {
+    const spotId = getEffectiveSpotlightId();
+    const isSpotlight = viewMode === 'spotlight' || (viewMode === 'grid' && spotId);
+
     videosEl.classList.remove('mode-grid', 'mode-spotlight', 'size-small', 'size-medium', 'size-large');
-    if (viewMode === 'spotlight' || (viewMode === 'grid' && getEffectiveSpotlightId())) {
-      // Force spotlight layout whenever someone is sharing — that was an explicit requirement
+
+    let strip = videosEl.querySelector('.thumb-strip');
+
+    if (isSpotlight) {
       videosEl.classList.add('mode-spotlight');
+      if (!strip) {
+        strip = document.createElement('div');
+        strip.className = 'thumb-strip';
+        videosEl.appendChild(strip);
+      }
+      const allTiles = [...videosEl.querySelectorAll('.tile')];
+      for (const tile of allTiles) {
+        const id = tile.id.replace('tile-', '');
+        if (id === spotId) {
+          tile.classList.add('spotlighted');
+          if (tile.parentNode !== videosEl) videosEl.insertBefore(tile, strip);
+        } else {
+          tile.classList.remove('spotlighted');
+          if (tile.parentNode !== strip) strip.appendChild(tile);
+        }
+      }
     } else {
       videosEl.classList.add('mode-grid', 'size-' + gridSize);
-    }
-    const spotId = getEffectiveSpotlightId();
-    for (const tile of videosEl.querySelectorAll('.tile')) {
-      const id = tile.id.replace('tile-', '');
-      tile.classList.toggle('spotlighted', id === spotId);
+      // Move every tile back to videosEl, drop the strip
+      if (strip) {
+        for (const tile of [...strip.querySelectorAll('.tile')]) videosEl.appendChild(tile);
+        strip.remove();
+      }
+      for (const tile of videosEl.querySelectorAll('.tile')) tile.classList.remove('spotlighted');
     }
   }
 
@@ -447,6 +476,10 @@
     });
     if (currentFilter) tile.querySelector('video').classList.add('filter-' + currentFilter);
     videosEl.appendChild(tile);
+    // If we're already in spotlight mode, immediately move the new tile into
+    // the strip so late-arriving peers don't get rendered as the spotlight by
+    // accident (they're appended as a direct child of #videos by default).
+    if (videosEl.classList.contains('mode-spotlight')) applyViewMode();
     return tile;
   }
 
