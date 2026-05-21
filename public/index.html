@@ -24,6 +24,8 @@
   button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
   input { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); padding: 8px 10px; border-radius: 8px; outline: none; }
   input:focus { border-color: var(--accent); }
+  input.invalid { border-color: var(--danger); }
+  input.invalid:focus { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(255,90,95,.25); }
 
   /* Lobby */
   #lobby { display: flex; align-items: center; justify-content: center; height: 100%; padding: 16px; }
@@ -141,12 +143,12 @@
     <h1>🎥 Meeting Room</h1>
     <p>Enter your name and a room code to join.</p>
     <div class="field">
-      <label for="name-input">Your name</label>
-      <input id="name-input" placeholder="e.g. Alice" autocomplete="off" />
+      <label for="name-input">Your name <span style="color: var(--danger);">*</span></label>
+      <input id="name-input" placeholder="ใส่ชื่อของคุณ (จำเป็น, ห้ามซ้ำกับคนในห้อง)" autocomplete="off" maxlength="40" required />
     </div>
     <div class="field">
-      <label for="room-input">Room code</label>
-      <input id="room-input" placeholder="e.g. team-standup" autocomplete="off" />
+      <label for="room-input">Room code <span style="color: var(--danger);">*</span></label>
+      <input id="room-input" placeholder="e.g. team-standup" autocomplete="off" maxlength="80" required />
     </div>
     <div class="row">
       <button id="join-btn" class="primary">Join meeting</button>
@@ -1004,12 +1006,47 @@
   roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinFlow(); });
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinFlow(); });
 
+  function abortJoinAttempt(message, focusName) {
+    if (socket) { try { socket.disconnect(); } catch {} socket = null; }
+    if (localStream) for (const t of localStream.getTracks()) t.stop();
+    localStream = null;
+    cameraStream = null;
+    joinBtn.disabled = false;
+    joinBtn.textContent = 'Join meeting';
+    // Drop ?room= from the URL so a refresh doesn't autojoin into a rejected state
+    const url = new URL(location.href);
+    url.searchParams.delete('room');
+    history.replaceState(null, '', url.toString().replace(/\?$/, ''));
+    showError(message);
+    if (focusName) { nameInput.focus(); nameInput.select(); }
+  }
+
   async function joinFlow() {
     lobbyError.style.display = 'none';
-    displayName = (nameInput.value || '').trim() || 'Guest';
-    roomId = (roomInput.value || '').trim();
-    if (!roomId) { showError('Please enter a room code.'); return; }
-    localStorage.setItem('mr_name', displayName);
+    nameInput.classList.remove('invalid');
+    roomInput.classList.remove('invalid');
+
+    const tryName = (nameInput.value || '').trim();
+    const tryRoom = (roomInput.value || '').trim();
+
+    if (!tryName) {
+      nameInput.classList.add('invalid');
+      showError('กรุณาใส่ชื่อก่อนเข้าห้อง');
+      nameInput.focus();
+      return;
+    }
+    if (!tryRoom) {
+      roomInput.classList.add('invalid');
+      showError('กรุณาใส่รหัสห้อง');
+      roomInput.focus();
+      return;
+    }
+    if (tryName.length > 40) {
+      nameInput.classList.add('invalid');
+      showError('ชื่อยาวเกินไป (สูงสุด 40 ตัวอักษร)');
+      nameInput.focus();
+      return;
+    }
 
     joinBtn.disabled = true;
     joinBtn.textContent = 'Joining…';
@@ -1024,25 +1061,41 @@
       return;
     }
 
-    lobby.style.display = 'none';
-    room.style.display = 'grid';
-    roomTagName.textContent = roomId;
-    attachStream('self', localStream);
-    setTileLabel('self', `${displayName} (you)`);
-    applyViewMode();
-
-    // Update URL so it's easy to share
-    const url = new URL(location.href);
-    url.searchParams.set('room', roomId);
-    history.replaceState(null, '', url.toString());
-
+    // Hold candidate values locally — only commit to displayName/roomId when
+    // the server's ack confirms the join. This way a rejected join (duplicate
+    // name, invalid room) leaves the lobby state intact and the user can
+    // retry without a refresh.
     socket = io({ transports: ['websocket', 'polling'] });
 
     socket.on('connect', () => {
-      socket.emit('join', { roomId, name: displayName }, (resp) => {
-        if (!resp || !resp.ok) { showError('Failed to join room.'); return; }
+      socket.emit('join', { roomId: tryRoom, name: tryName }, (resp) => {
+        if (!resp || !resp.ok) {
+          const msg = (resp && resp.message) || 'ไม่สามารถเข้าห้องได้';
+          const isNameError = resp && (resp.error === 'name_taken' || resp.error === 'name_required' || resp.error === 'name_too_long');
+          if (isNameError) nameInput.classList.add('invalid');
+          abortJoinAttempt(msg, isNameError);
+          return;
+        }
+
+        // Commit
         selfId = resp.selfId;
         hostId = resp.hostId;
+        displayName = tryName;
+        roomId = tryRoom;
+        localStorage.setItem('mr_name', displayName);
+
+        lobby.style.display = 'none';
+        room.style.display = 'grid';
+        roomTagName.textContent = roomId;
+        attachStream('self', localStream);
+        setTileLabel('self', `${displayName} (you)`);
+        applyViewMode();
+
+        // Update URL so it's easy to share
+        const url = new URL(location.href);
+        url.searchParams.set('room', roomId);
+        history.replaceState(null, '', url.toString());
+
         // For each existing peer, we are the new arrival → we initiate.
         for (const p of resp.peers) {
           const entry = createPeer(p.id, p.name, true);
@@ -1054,7 +1107,6 @@
         renderTileState('self');
         renderPeerList();
         applyViewMode();
-        // Push our initial state so the rest of the room knows our mic/cam status
         emitState({ mic: micOn, cam: camOn, sharing, handRaised });
       });
     });

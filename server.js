@@ -148,10 +148,34 @@ io.on('connection', (socket) => {
 
   socket.on('join', ({ roomId, name }, ack) => {
     if (!roomId || typeof roomId !== 'string') {
-      if (typeof ack === 'function') ack({ ok: false, error: 'invalid_room' });
+      if (typeof ack === 'function') ack({ ok: false, error: 'invalid_room', message: 'รหัสห้องไม่ถูกต้อง' });
       return;
     }
-    const displayName = (name && String(name).trim()) || 'Guest';
+    const displayName = name && String(name).trim();
+    if (!displayName) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'name_required', message: 'กรุณาใส่ชื่อก่อนเข้าห้อง' });
+      return;
+    }
+    if (displayName.length > 40) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'name_too_long', message: 'ชื่อยาวเกินไป (สูงสุด 40 ตัวอักษร)' });
+      return;
+    }
+
+    // Case-insensitive duplicate check — only against an already-existing room
+    // so failed joins don't leave behind empty rooms.
+    const existing = rooms.get(roomId);
+    if (existing) {
+      const lower = displayName.toLowerCase();
+      for (const info of existing.peers.values()) {
+        if (info.name.toLowerCase() === lower) {
+          if (typeof ack === 'function') {
+            ack({ ok: false, error: 'name_taken', message: `ชื่อ "${displayName}" มีคนใช้อยู่ในห้องนี้แล้ว — กรุณาเลือกชื่ออื่น` });
+          }
+          return;
+        }
+      }
+    }
+
     joinedRoom = roomId;
     socket.join(roomId);
 
@@ -165,10 +189,10 @@ io.on('connection', (socket) => {
     });
     if (!room.hostId) room.hostId = socket.id;
 
-    const existing = peerSnapshot(room).filter((p) => p.id !== socket.id);
+    const peers = peerSnapshot(room).filter((p) => p.id !== socket.id);
 
     if (typeof ack === 'function') {
-      ack({ ok: true, selfId: socket.id, hostId: room.hostId, peers: existing });
+      ack({ ok: true, selfId: socket.id, hostId: room.hostId, peers });
     }
 
     socket.to(roomId).emit('peer-joined', { id: socket.id, name: displayName });
@@ -193,12 +217,25 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('rename', ({ name }) => {
+  socket.on('rename', ({ name }, ack) => {
     if (!joinedRoom) return;
     const room = getRoom(joinedRoom);
     const info = room.peers.get(socket.id);
     if (!info) return;
-    info.name = (name && String(name).trim()) || info.name;
+    const trimmed = name && String(name).trim();
+    if (!trimmed || trimmed.length > 40) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'invalid_name' });
+      return;
+    }
+    const lower = trimmed.toLowerCase();
+    for (const [id, other] of room.peers) {
+      if (id !== socket.id && other.name.toLowerCase() === lower) {
+        if (typeof ack === 'function') ack({ ok: false, error: 'name_taken' });
+        return;
+      }
+    }
+    info.name = trimmed;
+    if (typeof ack === 'function') ack({ ok: true });
     broadcastPeers(joinedRoom);
   });
 
